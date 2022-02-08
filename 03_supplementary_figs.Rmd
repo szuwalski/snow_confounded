@@ -1,0 +1,1138 @@
+---
+author: "Cody Szuwalski"
+date:
+output:
+  pdf_document:
+    fig_caption: yes
+    fig_height: 4
+    fig_width: 6
+header-includes: 
+  - \usepackage[left]{lineno}
+  - \linenumbers
+#-  \pagenumbering{gobble}
+csl: fish-and-fisheries.csl
+title: "Supplementary figures for: Estimating time-variation in confounded processes in population dynamics modeling: a case study for snow crab in the eastern Bering Sea"
+---
+
+```{r, include=FALSE}
+
+knitr::opts_chunk$set(echo=FALSE,message=FALSE,warning=FALSE)
+
+library(plyr)
+library(dplyr)
+library(knitr)
+library(ggplot2)
+library(PBSmodelling)
+library(pander)
+library(coda)
+library(maps)
+library(lattice)
+library(PBSmapping)
+library(mapdata)    #some additional hires data
+library(maptools)   #useful tools such as reading shapefiles
+library(mapproj)
+library(plotrix)
+
+in_path<-"C:/gmacs/gmr/R/"
+library(ggridges)
+library(reshape2)
+library(miceadds)
+source.all( path=in_path, grepstring="\\.R",  print.source=TRUE, file_sep="__"  )
+
+#source("plot.bubble.residuals.addn.R")
+
+```
+
+
+```{r,echo=F,message=FALSE,warning=F,include=FALSE}
+
+survey_fig_N<-7
+ABC_buffer  <-0.5
+chosen_model<-"opilio"
+chosen_ind<-1
+ChosenInd<-1
+
+#===PULL gmacs DATA AND outputs
+
+#===============
+# directory in which all of the scenario folder reside and names of the scenario folders
+Scenarios   <-c("20_sq","20_sq_q","20_sq_m","20_sq_both")
+ScenarioNames<-c("Status quo","Vary q","Vary M","Vary both")
+
+#==make a list of the scenario names
+##==save all of the output from the scenarios
+snowad.rep<-rep(list(list()),length(Scenarios))
+CatchYrN<-rep(list(list()),length(Scenarios))
+SurvYrN<-rep(list(list()),length(Scenarios))
+DiscYrFN<-rep(list(list()),length(Scenarios))
+DiscYrMN<-rep(list(list()),length(Scenarios))
+TrawlYrN<-rep(list(list()),length(Scenarios))
+ObsCatchNumbers<-rep(list(list()),length(Scenarios))
+ObsCatchPounds<-rep(list(list()),length(Scenarios))
+RetCatchYrs<-rep(list(list()),length(Scenarios))
+TotCatchYrs<-rep(list(list()),length(Scenarios))
+ObsDiscF<-rep(list(list()),length(Scenarios))
+ObsDiscM<-rep(list(list()),length(Scenarios))
+TrawlBycatch<-rep(list(list()),length(Scenarios))
+SurveyNumbers<-rep(list(list()),length(Scenarios))
+SurveyYrs<-rep(list(list()),length(Scenarios))
+LengthBins<-rep(list(list()),length(Scenarios))
+GrowthNfem<-rep(list(list()),length(Scenarios))
+GrowthNm<-rep(list(list()),length(Scenarios))
+GrowthData<-rep(list(list()),length(Scenarios))
+
+REPfileEnd<-rep(list(list()),length(Scenarios))
+MgmtQuants<-rep(list(list()),length(Scenarios))
+
+# names(snowad.rep[[ChosenInd]])
+# snowad.rep[[ChosenInd]]$"Predicted probability of maturing female" 
+# snowad.rep[[ChosenInd]]$"Predicted probability of maturing male" 
+
+for(x in 1:length(Scenarios))
+{
+  snowad.rep[[x]]  <-readList(paste(Scenarios[x],"/R_input.txt",sep=""))
+
+DATfile <-readLines(paste(Scenarios[x],"/2016sc.DAT",sep=""))
+
+# length of data types
+tmp<-grep("number of years of retained fishery data",DATfile)
+CatchYrN[[x]] <-as.numeric(DATfile[tmp+1])
+tmp<-grep("number of years of survey data",DATfile)
+SurvYrN[[x]] <-as.numeric(DATfile[tmp+1])
+tmp<-grep("number of years of fishery discard",DATfile)
+DiscYrFN[[x]] <-as.numeric(DATfile[tmp+1])
+tmp<-grep("number of years of fishery male discard",DATfile)
+DiscYrMN[[x]] <-as.numeric(DATfile[tmp+1])
+tmp<-grep("number of years of trawl discard",DATfile)
+TrawlYrN[[x]] <-as.numeric(DATfile[tmp+1])
+
+# observed retained catch
+tmp<-grep("retained catch in numbers",DATfile)
+ObsCatchNumbers[[x]]<-as.numeric(DATfile[(tmp+1):(tmp+CatchYrN[[x]])])[1:CatchYrN[[x]]]
+tmp<-grep("retained catch in pounds",DATfile)
+ObsCatchPounds[[x]]<-as.numeric(DATfile[(tmp+1):(tmp+CatchYrN[[x]])])[1:CatchYrN[[x]]]
+tmp<-grep("years for fishery data",DATfile)
+RetCatchYrs[[x]]<-as.numeric(unlist(strsplit(DATfile[(tmp+1)],split=" ")))
+RetCatchYrs[[x]]<-RetCatchYrs[[x]][!is.na(RetCatchYrs[[x]])]
+
+tmp<-grep("years when have fishery discard length data",DATfile)
+TotCatchYrs[[x]]<-as.numeric(unlist(strsplit(DATfile[(tmp+1)],split=" ")))
+TotCatchYrs[[x]]<-TotCatchYrs[[x]][!is.na(TotCatchYrs[[x]])]
+
+# observed discard
+tmp<-grep("Discard Catch from observer",DATfile)
+ObsDiscF[[x]]<-as.numeric(DATfile[(tmp+2):(tmp+1+CatchYrN[[x]])])[1:CatchYrN[[x]]]
+tmp<-grep("discard catch males",DATfile)
+ObsDiscM[[x]]<-as.numeric(DATfile[(tmp+1):(tmp+CatchYrN[[x]])])[1:CatchYrN[[x]]]
+
+# observed trawl
+tmp<-grep(" bycatch numbers by geartype",DATfile)
+TrawlBycatch[[x]]<-as.numeric(DATfile[(tmp+2):(tmp+1+CatchYrN[[x]])])[1:CatchYrN[[x]]]
+
+# survey numbers
+tmp<-grep("survey numbers by year",DATfile)
+SurveyNumbers[[x]]<-as.numeric(DATfile[(tmp+1):(tmp+SurvYrN[[x]])])
+tmp<-grep("years for survey data",DATfile)
+SurveyYrs[[x]]<-na.omit(as.numeric(unlist(strsplit(DATfile[(tmp+1)],split=" "))))
+
+tmp<-grep("length bins",DATfile)[[5]]
+LengthBins[[x]]<-as.numeric(unlist(strsplit(DATfile[(tmp+1)],split=" ")))
+LengthBins[[x]]<-LengthBins[[x]][!is.na(LengthBins[[x]])]
+
+tmp       <-grep("growth data female",DATfile)
+GrowthNfem[[x]]<-as.numeric(DATfile[(tmp+1)])
+tmp1      <-grep("growth data male",DATfile)
+GrowthNm[[x]]  <-as.numeric(DATfile[(tmp1+1)])
+GrowthData[[x]]<-matrix(NA,ncol=4,nrow=max(GrowthNm[[x]],GrowthNfem[[x]]))
+
+GrowthData[[x]][1:GrowthNfem[[x]],1] <-na.omit(as.numeric(unlist(strsplit(DATfile[(tmp+2)],split="\t"))))
+GrowthData[[x]][1:GrowthNfem[[x]],2] <-na.omit(as.numeric(unlist(strsplit(DATfile[(tmp+3)],split="\t"))))
+
+GrowthData[[x]][1:GrowthNm[[x]],3]  <-na.omit(as.numeric(unlist(strsplit(DATfile[(tmp1+2)],split="\t"))))
+GrowthData[[x]][1:GrowthNm[[x]],4] <-na.omit(as.numeric(unlist(strsplit(DATfile[(tmp1+3)],split="\t"))))
+
+#==pulling MLEs for management quantities
+for(x in 1:length(Scenarios))
+{
+  REPfileEnd[[x]]       <-readLines(paste(Scenarios[x],"/2016sc.REP",sep=""))
+  MgmtQuants[[x]]       <-as.numeric(unlist(strsplit(as.character(REPfileEnd[[x]][1]),split=" ")))
+  MgmtQuants[[x]]$Status<-as.numeric(MgmtQuants[[x]][5])/as.numeric(MgmtQuants[[x]][2])
+  names(MgmtQuants[[x]])<-c("F","BMSY","Surv_MMB","Fish_MMB","Mate_MMB","F35","FOFL","OFL","Status")
+  }
+}
+
+
+#==MLE stuff
+#==set up storage
+  mle_B35<-list()
+  mle_F35<-list()
+  mle_FOFL<-list()
+  mle_OFL<-list()
+  mle_MMB<-list()
+  mle_projMMB<-list()
+  mle_ABC<-list()
+  mle_Status<-list()
+  mle_Status2<-list()
+  mle_allMMB<-list()
+
+  #==CHECK THIS  
+for(x in 1:length(Scenarios))
+{  
+ REPfile <-readLines(paste(Scenarios[x],"/2016sc.REP",sep=""))
+ temp <-as.numeric(unlist(strsplit(REPfile[1],split=" ")))
+ temp <-temp[!is.na(temp)]
+ mle_B35[[x]] <-temp[2]
+ mle_F35[[x]] <-temp[6]
+ mle_FOFL[[x]]<-temp[7]
+ mle_OFL[[x]] <-temp[8]
+ mle_MMB[[x]] <-temp[5]    
+ mle_ABC[[x]]<-mle_OFL[[x]]*ABC_buffer
+ mle_Status[[x]]<-mle_MMB[[x]]/mle_B35[[x]]
+
+ mle_projMMB[[x]]<-snowad.rep[[x]]$"Mature male biomass at mating"[SurvYrN[[x]]]
+ mle_allMMB[[x]]<-snowad.rep[[x]]$"Mature male biomass at mating"
+ mle_Status2[[x]]<-mle_projMMB[[x]]/ mle_B35[[x]]
+   
+}
+  
+ B35<-mle_B35
+ F35<-mle_F35
+ FOFL<-mle_FOFL
+ OFL<-mle_OFL
+ MMB<-mle_MMB    
+ ABC<-mle_ABC
+ Status<-mle_Status 
+ projMMB<-mle_projMMB
+ proj_Status<-mle_Status2
+ 
+ # organize data_2020
+# repfile20<-scan("20_gmacs_3_proj_rec/mcoutSSB.REP")
+# hist_ssb20<-matrix(repfile20,ncol=length(seq(1982,2019)),byrow=T)
+# colnames(hist_ssb20)<-seq(1982,2019)
+# 
+# innames<-c("Draw","Replicate","Treatment",paste("F",seq(1,length(M[[1]]$log_fbar))),
+#            "B35",paste("proj_ssb_",seq(2020,2025)))
+# projfile20<-as.data.frame(matrix(scan("20_gmacs_3_proj_rec/mcoutPROJ.REP"),ncol=length(innames),byrow=TRUE))
+# colnames(projfile20)<-innames
+# 
+# ind<-grep('ssb',colnames(projfile20))
+# adj_proj20<-dplyr::filter(projfile20,Replicate==1& Treatment==3)
+# proj_ssb20<-cbind(hist_ssb20,adj_proj20[,ind])
+# colnames(proj_ssb20)<-seq(1982,2025)
+# 
+# proj_ssb_1<-proj_ssb20[1,]
+# 
+#  proj_ssb_19<-proj_ssb_1[colnames(proj_ssb_1)==2019]
+#  proj_ssb_20<-proj_ssb_1[colnames(proj_ssb_1)==2020] 
+
+```
+
+
+\newpage
+
+```{r,echo=FALSE,warning=FALSE,message=F,fig.width=7,fig.height=8,fig.cap="\\label{growthfits}Model fits to the growth data. These data were fit outside of the assessment model with a linear regression and the associated parameters were specified within the assessment."}
+
+inlwd<-1.5
+flength<-rep(list(list()),length(Scenarios))
+mlength<-rep(list(list()),length(Scenarios))
+for(x in 1:length(Scenarios))
+{
+  flength[[x]]<-snowad.rep[[x]]$'Predicted mean postmolt length female'
+  mlength[[x]]<-snowad.rep[[x]]$'Predicted mean postmolt length male'
+}
+
+par(mfrow=c(2,1),mar=c(.1,.1,.1,.1),oma=c(4,4,1,1))
+
+plot(GrowthData[[2]][,2]-GrowthData[[2]][,1]~GrowthData[[2]][,1],ylim=c(0,20),xlim=c(20,90),pch=16,col='red',xaxt='n',las=2)
+points(GrowthData[[1]][,2]-GrowthData[[1]][,1]~GrowthData[[1]][,1],pch=16,col='grey' )
+
+for(x in 1:length(Scenarios))
+ lines(flength[[x]]-LengthBins[[x]]~LengthBins[[x]],lty=x,lwd=inlwd,col=x)
+
+ 
+legend(bty='n',"topleft","Female")
+
+plot(GrowthData[[2]][,4]-GrowthData[[2]][,3]~GrowthData[[2]][,3],ylim=c(0,20),xlim=c(20,90),pch=16,col='red',las=1)
+points(GrowthData[[1]][,4]-GrowthData[[1]][,3]~GrowthData[[1]][,3],pch=16,col='grey' )
+
+legend(bty='n',"topleft","Male")
+mtext(side=2,"Growth increment (mm)",outer=T,line=2)
+mtext(side=1,"Premolt length (mm)",outer=T,line=2)
+for(x in 1:length(Scenarios))
+ lines(mlength[[x]]-LengthBins[[x]]~LengthBins[[x]],lty=x,lwd=inlwd,col=x)
+
+legend("bottomright",bty='n',legend=ScenarioNames,lwd=2,col=seq(1,length(ScenarioNames)))
+
+```
+
+
+
+\newpage
+
+```{r,echo=FALSE,warning=FALSE,message=F,fig.width=8,fig.height=10,fig.cap="\\label{catchfits}Model fits to catch data."}
+
+#==pull in weights used as SD
+# Read data file
+CTLfile <-readLines(paste(Scenarios[1],"/2016sc.CTL",sep=""))
+tmp<-grep("weight for retained catch biomass",CTLfile)
+RetCatWt <-as.numeric(unlist(strsplit(CTLfile[tmp+1],split=" ")))
+sdRetCat<-sqrt(1/(2*RetCatWt))
+
+tmp<-grep("wght_total_catch ",CTLfile)
+TotCatWt <-as.numeric(unlist(strsplit(CTLfile[tmp+1],split=" ")))
+sdTotCat<-sqrt(1/(2*TotCatWt))
+
+tmp<-grep("disc_catch_wght_fem ",CTLfile)
+FemDiscWt <-as.numeric(unlist(strsplit(CTLfile[tmp+1],split=" ")))
+sdFemDisc <-sqrt(1/(RetCatWt*FemDiscWt*2))
+
+#==retained catch biomass
+par(mfrow=c(4,1),mar=c(.1,.1,.3,.1),oma=c(4,4.5,1,1))
+plot(snowad.rep[[2]]$"Observed retained catch biomass"~RetCatchYrs[[2]],las=1,ylab="Retained catch biomass (1000 t)", xaxt="n",ylim=c(0,175),xlim=c(1982,2019))
+
+for(x in 1:length(snowad.rep))
+ lines(snowad.rep[[x]]$"Predicted retained catch biomas"~RetCatchYrs[[x]],lty=x,col=x)
+
+
+ 
+legend("topright",bty='n',pch=c(NA,1),lty=c(1,NA),legend=c("Predicted","Observed"))
+legend("topleft",bty='n',"Retained")
+
+for(j in 1:length(RetCatchYrs[[2]]))
+{
+ segments(x0=RetCatchYrs[[2]][j],x1=RetCatchYrs[[2]][j],
+		y0=as.numeric(unlist(snowad.rep[[2]]$"Observed retained catch biomass"))[j]  +   1.96*sdRetCat,
+		y1=as.numeric(unlist(snowad.rep[[2]]$"Observed retained catch biomass"))[j] - 1.96*sdRetCat)
+}
+
+#===discard female biomass
+plot(snowad.rep[[2]]$"observed female discard mortality biomass"~RetCatchYrs[[2]],las=1,ylab="Female discard (1000 t)",xaxt="n",ylim=c(0,0.2),xlim=c(1982,2019))
+for(x in 1:length(snowad.rep))
+  lines(snowad.rep[[x]]$"predicted female discard mortality biomass"~RetCatchYrs[[x]],lty=x,col=x)
+legend("topleft",bty='n',"Discard (female)")
+for(j in 1:length(RetCatchYrs[[2]]))
+{
+ segments(x0=RetCatchYrs[[2]][j],x1=RetCatchYrs[[2]][j],
+		y0=as.numeric(unlist(snowad.rep[[2]]$"observed female discard mortality biomass"))[j]  +   1.96*(sdFemDisc*(mean(as.numeric(unlist(snowad.rep[[2]]$"observed female discard mortality biomass"))))),
+		y1=as.numeric(unlist(snowad.rep[[2]]$"observed female discard mortality biomass"))[j] - 1.96*sdFemDisc*(mean(as.numeric(unlist(snowad.rep[[2]]$"observed female discard mortality biomass")))))
+}
+
+#===discard male biomass
+plot(snowad.rep[[2]]$"observed male discard mortality biomass"~RetCatchYrs[[2]],las=1,ylab="Female discard (1000 t)",xaxt="n",ylim=c(0,30),xlim=c(1982,2019))
+for(x in 1:length(snowad.rep))
+ lines(snowad.rep[[x]]$"predicted discard male catch biomass"~RetCatchYrs[[x]],lty=x,col=x)
+legend("topleft",bty='n',"Discard (male)")
+for(j in 1:length(RetCatchYrs[[2]]))
+{
+ segments(x0=RetCatchYrs[[2]][j],x1=RetCatchYrs[[2]][j],
+		y0=as.numeric(unlist(snowad.rep[[2]]$"observed male discard mortality biomass"))[j]  +   1.96*sdTotCat,
+		y1=as.numeric(unlist(snowad.rep[[2]]$"observed male discard mortality biomass"))[j] - 1.96*sdTotCat)
+}
+
+
+#===trawl catch biomass
+plot(snowad.rep[[2]]$"observed trawl catch biomass"[1:CatchYrN[[2]]]~RetCatchYrs[[2]],las=1,ylab="Trawl bycatch (1000 t)",xlab="Year",ylim=c(0,5),xlim=c(1982,2019))
+for(x in 1:length(snowad.rep))
+  lines(snowad.rep[[x]]$"predicted trawl catch biomass"[1:CatchYrN[[x]]]~RetCatchYrs[[x]],lty=x,col=x)
+legend("topleft",bty='n',"Trawl")
+mtext(side=2,outer=T,line=3,"Biomass (1000 t)")
+mtext(side=1,outer=T,line=2.5,"Year")
+legend("topright",bty='n',lty=seq(1,length(ScenarioNames)),legend=ScenarioNames,col=seq(1,length(ScenarioNames)))
+for(j in 1:length(RetCatchYrs[[2]]))
+{
+ segments(x0=RetCatchYrs[[2]][j],
+          x1=RetCatchYrs[[2]][j],
+          y0=as.numeric(unlist(snowad.rep[[2]]$"observed trawl catch biomass"))[j]  + 1.96*sdRetCat*(mean(as.numeric(unlist(snowad.rep[[2]]$"observed trawl catch biomass")))),
+		y1=as.numeric(unlist(snowad.rep[[2]]$"observed trawl catch biomass"))[j] - 
+		  1.96*sdRetCat*(mean(as.numeric(unlist(snowad.rep[[2]]$"observed trawl catch biomass")))))
+}
+
+```
+
+
+\newpage
+
+```{r,echo=FALSE,warning=FALSE,message=F,fig.width=8.5,fig.height=8.5,fig.cap="\\label{catchcomps}Model fits to retained catch size-composition data. Y-axes are proportion."}
+
+PlotLenProps<-function(obs,obs2=NA,pred,pred2=NA,inYears,xquant,chopX,chopY,pointsize=1,YaxisN,XaxisN,addRow=NA,minX=0)
+{
+  
+ #==find input years to define size of figure
+ Year1<-min(na.omit(unlist(inYears)))
+ YearEnd<-max(na.omit(unlist(inYears)))
+ RefYear<-seq(Year1,YearEnd)
+ inRow<-ceiling(sqrt(length(RefYear)))
+ incol<-ceiling(sqrt(length(RefYear)))
+  if(!is.na(addRow))
+  inRow<-inRow+addRow
+ 
+ xlimBot<-min(unlist(lapply(xquant,min)))
+ xlimTop<-max(unlist(lapply(xquant,max)))
+ if(xlimTop>chopX)
+   xlimTop<-chopX
+ if(xlimBot>minX)
+  xlimBot<-minX
+ par(mfcol=c(inRow,incol),mar=c(0.1,.1,.1,.1),oma=c(4,4,1,1))
+ for(x in 1:length(RefYear))
+ {
+  #==plot observations
+   #==must find the observations associatd with a given year
+   obsIndex<-which(unlist(lapply(lapply(inYears,match,RefYear[x]),any)))[1]
+   obsYear<-which(!is.na(match(inYears[[obsIndex]],RefYear[x])))
+   plot(obs[[obsIndex]][obsYear,]~xquant[[obsIndex]],pch=15,ylim=c(0,chopY),xlim=c(xlimBot,xlimTop),xaxt='n',yaxt='n',cex=pointsize)
+   legend("topleft",legend=inYears[[obsIndex]][x],bty='n')
+   
+   if(!is.na(obs2))
+   {
+   obsIndex2<-which(unlist(lapply(lapply(inYears,match,RefYear[x]),any)))[1]
+   obsYear<-which(!is.na(match(inYears[[obsIndex2]],RefYear[x])))
+   points(obs2[[obsIndex2]][obsYear,]~xquant[[obsIndex2]],pch=16,ylim=c(0,chopY),xlim=c(xlimBot,xlimTop),xaxt='n',yaxt='n',cex=pointsize) 
+   } 
+     
+
+ for(y in 1:length(inYears))
+  {
+   useInd<-which(!is.na(match(inYears[[y]],RefYear[x])))
+  #==now plot predictions from each model, if that year exists
+    if(length(useInd)>0)
+     lines(pred[[y]][useInd,]~xquant[[y]],pch=16,col=y,cex=pointsize,lty=y )
+   
+   if(!is.na(obs2))
+   {
+     useInd<-which(!is.na(match(inYears[[y]],RefYear[x])))
+  #==now plot predictions from each model, if that year exists
+    if(length(useInd)>0)
+     lines(pred2[[y]][useInd,]~xquant[[y]],pch=16,col=y,cex=pointsize,lty=y )
+   }
+  }
+   
+  }
+ }
+
+
+#==this sucks, butwriting a function to do this has too many moving parts....
+inPred<-rep(list(list()),length(ScenarioNames))
+for(x in 1:length(Scenarios))
+  inPred[[x]]<-(snowad.rep[[x]]$"Predicted proportion fishery retained new male" + snowad.rep[[x]]$"Predicted proportion fishery retained old male")[,-1]
+
+
+obs<-rep(list(list()))
+for(x in 1:length(snowad.rep))
+  obs[[x]]<-(snowad.rep[[x]]$"Observed proportion fishery retained new male" +snowad.rep[[x]]$"Observed proportion fishery retained old male")[,-1]
+
+LengthBin_in<-LengthBins
+for(x in (length(snowad.rep)+1):length(ScenarioNames))
+LengthBin_in[[x]]<-LengthBin_in[[length(snowad.rep)]]
+
+inYrs<-rep(list(list()),length(ScenarioNames))
+for(x in 1:length(snowad.rep))
+ inYrs[[x]]<-  SurveyYrs[[x]][1:(SurvYrN[[x]])]
+
+
+ inYrs[[2]]<-inYrs[[3]]
+
+
+PlotLenProps(obs = obs,
+             pred =inPred,
+             inYears = inYrs,
+             xquant = LengthBin_in,
+             chopX = 140,
+             chopY = .3,
+             XaxisN = 7,
+             minX=85,
+             YaxisN = 7,
+             addRow = -1)
+             plot.new()
+              legend("center",pch=c(NA,16,NA),lty=c(NA,NA,1),
+                    col=c(NA,1,2),legend=c("Males","Obs","Pred"),bty='n')
+             plot.new()
+             legend("center",lty=seq(1,length(ScenarioNames)),legend=ScenarioNames,bty='n',cex=1,col=seq(1,length(ScenarioNames)))
+                          plot.new()
+       
+```
+
+\newpage
+
+```{r,echo=FALSE,warning=FALSE,message=F,fig.width=8.5,fig.height=8.5,fig.cap="\\label{totalcomps}Model fits to total catch size-composition data. Y-axes are proportion."}
+
+#==this sucks, butwriting a function to do this has too many moving parts....
+inPred<-rep(list(list()),length(ScenarioNames))
+for(x in 1:length(Scenarios))
+  inPred[[x]]<-(snowad.rep[[x]]$"Predicted proportion fishery total new male" + snowad.rep[[x]]$"Predicted proportion fishery total old male")[,-1]
+
+
+obs<-rep(list(list()))
+for(x in 1:length(snowad.rep))
+  obs[[x]]<-(snowad.rep[[x]]$"Observed proportion fishery total new male" +snowad.rep[[x]]$"Observed proportion fishery total old male")[,-1]
+
+
+LengthBin_in<-LengthBins
+for(x in (length(snowad.rep)+1):length(ScenarioNames))
+LengthBin_in[[x]]<-LengthBin_in[[length(snowad.rep)]]
+
+inYrs<-rep(list(list()),length(ScenarioNames))
+for(x in 1:length(snowad.rep))
+ inYrs[[x]]<-  SurveyYrs[[x]][11:(SurvYrN[[x]])]
+
+ inYrs[[2]]<-inYrs[[3]]
+
+PlotLenProps(obs = obs,
+             pred =inPred,
+             inYears = inYrs,
+             xquant = LengthBin_in,
+             chopX = 140,
+             chopY = .25,
+             XaxisN = 7,
+             minX=85,
+             YaxisN = 7,
+             addRow = 0)
+             plot.new()
+             #  legend("center",pch=c(NA,16,NA),lty=c(NA,NA,1),
+             #        col=c(NA,1,2),legend=c("Males","Obs","Pred"),bty='n')
+             # plot.new()
+             legend("center",lty=seq(1,length(ScenarioNames)),legend=ScenarioNames,bty='n',col=seq(1,length(ScenarioNames)))
+                          plot.new()
+       
+```
+
+\newpage
+
+```{r,echo=FALSE,warning=FALSE,message=F,fig.width=8.5,fig.height=10,fig.cap="\\label{trawlcomps}Model fits to trawl catch size-composition data. Y-axes are proportion."}
+
+#==these are fit added together, but when split, the fit is really crummy             
+inPred<-rep(list(list()),length(ScenarioNames))
+for(x in 1:length(snowad.rep))
+  inPred[[x]]<-snowad.rep[[x]]$"Predicted proportion trawl male" [,-1]
+
+inPred2<-rep(list(list()),length(ScenarioNames))
+for(x in 1:length(snowad.rep))
+  inPred2[[x]]<-snowad.rep[[x]]$"Predicted proportion trawl female" [,-1]
+
+
+obs<-rep(list(list()),length(ScenarioNames))
+for(x in 1:length(snowad.rep))
+  obs[[x]]<-snowad.rep[[x]]$"Observed proportion trawl male"[,-1]
+
+
+
+obs2<-rep(list(list()),length(ScenarioNames))
+for(x in 1:length(snowad.rep))
+  obs2[[x]]<-snowad.rep[[x]]$"Observed proportion trawl female"[,-1]
+
+
+
+inYrs<-rep(list(list()),length(ScenarioNames))
+for(x in 1:length(snowad.rep))
+ inYrs[[x]]<-  SurveyYrs[[x]][10:(SurvYrN[[x]])]
+
+
+inYrs[[2]]<-inYrs[[3]]
+
+LengthBin_in<-LengthBins
+for(x in (length(snowad.rep)+1):length(ScenarioNames))
+LengthBin_in[[x]]<-LengthBin_in[[length(snowad.rep)]]
+
+
+make_sum_1<-function(input)
+{
+ tmp<-input
+ tots<-sum(tmp)
+ obs<-tmp/tots
+ return(obs)
+}
+ 
+
+for(x in 1:length(obs))
+{
+ for(y in 1:nrow(obs[[x]]))
+ { 
+  obs[[x]][y,]<-make_sum_1(obs[[x]][y,])
+  obs2[[x]][y,]<-make_sum_1(obs2[[x]][y,])
+  inPred[[x]][y,]<-make_sum_1(inPred[[x]][y,])
+   inPred2[[x]][y,]<-make_sum_1(inPred2[[x]][y,])
+ }
+}
+
+PlotLenProps<-function(obs,obs2=NA,pred,pred2=NA,inYears,xquant,chopX,chopY,pointsize=1,YaxisN,XaxisN,addRow=NA,minX=0)
+{
+  
+ #==find input years to define size of figure
+ Year1<-min(na.omit(unlist(inYears)))
+ YearEnd<-max(na.omit(unlist(inYears)))
+ RefYear<-seq(Year1,YearEnd)
+ inRow<-ceiling(sqrt(length(RefYear)))
+ incol<-ceiling(sqrt(length(RefYear)))
+  if(!is.na(addRow))
+  inRow<-inRow+1
+ 
+ xlimBot<-min(unlist(lapply(xquant,min)))
+ xlimTop<-max(unlist(lapply(xquant,max)))
+ if(xlimTop>chopX)
+   xlimTop<-chopX
+ if(xlimBot>minX)
+  xlimBot<-minX
+ par(mfcol=c(inRow,incol),mar=c(0.1,.1,.1,.1),oma=c(4,4,1,1))
+ for(x in 1:length(RefYear))
+ {
+  #==plot observations
+   #==must find the observations associatd with a given year
+   obsIndex<-which(unlist(lapply(lapply(inYears,match,RefYear[x]),any)))[1]
+   obsYear<-which(!is.na(match(inYears[[obsIndex]],RefYear[x])))
+   plot(obs[[obsIndex]][obsYear,]~xquant[[obsIndex]],pch=15,ylim=c(0,chopY),xlim=c(xlimBot,xlimTop),xaxt='n',yaxt='n',cex=pointsize)
+   legend("topleft",legend=inYears[[obsIndex]][x],bty='n')
+   
+   if(!is.na(obs2))
+   {
+   obsIndex2<-which(unlist(lapply(lapply(inYears,match,RefYear[x]),any)))[1]
+   obsYear<-which(!is.na(match(inYears[[obsIndex2]],RefYear[x])))
+   points(obs2[[obsIndex2]][obsYear,]~xquant[[obsIndex2]],pch=16,ylim=c(0,chopY),xlim=c(xlimBot,xlimTop),xaxt='n',yaxt='n',cex=pointsize) 
+   } 
+     
+
+ for(y in 1:length(inYears))
+  {
+   useInd<-which(!is.na(match(inYears[[y]],RefYear[x])))
+  #==now plot predictions from each model, if that year exists
+    if(length(useInd)>0)
+     lines(pred[[y]][useInd,]~xquant[[y]],pch=16,col=y,cex=pointsize,lty=y )
+   
+   if(!is.na(obs2))
+   {
+     useInd<-which(!is.na(match(inYears[[y]],RefYear[x])))
+  #==now plot predictions from each model, if that year exists
+    if(length(useInd)>0)
+     lines(pred2[[y]][useInd,]~xquant[[y]],pch=16,col=y,cex=pointsize,lty=y )
+   }
+  }
+   
+  }
+ }
+LengthBin_in<-LengthBins
+for(x in (length(snowad.rep)+1):length(ScenarioNames))
+LengthBin_in[[x]]<-LengthBin_in[[length(snowad.rep)]]
+
+
+PlotLenProps(obs =obs,
+             obs2=obs2,
+             pred =inPred,
+             pred2=inPred2,
+             inYears = inYrs,
+             xquant = LengthBin_in,
+             chopX = 140,
+             chopY = 0.25,
+             pointsize = .7,
+             XaxisN = 6,
+             YaxisN = 6,
+             addRow = -1,
+             minX=27.5)
+             plot.new()
+             legend("center",pch=c(NA,15,3),col=c(NA,1,1),legend=c("Observations","Male","Female"),bty='n')
+             plot.new()
+             # legend("center",lty=c(NA,1,1),col=c(NA,2,4),legend=c("Predictions","Male","Female"),bty='n')
+             # plot.new()
+             legend("center",lty=seq(1,length(ScenarioNames)),legend=seq(1,length(ScenarioNames)),bty='n',col=seq(1,length(ScenarioNames)))
+```
+
+
+\newpage
+
+```{r,echo=FALSE,warning=FALSE,message=F,fig.width=7,fig.height=7,fig.cap="\\label{bsfrffits}Model fits to size-composition data from summer survey experiments (2009 & 2010)"}
+
+#===industry survey
+ObsIndustry2009<-c(snowad.rep[[1]]$"Observed industry survey mature biomass")
+ObsIndustry2010<-c(snowad.rep[[1]]$"Observed 2010 industry survey mature biomass")
+
+#==length proportions from side by side surveys (2009, 2010)
+par(mfrow=c(2,2))
+par(mar=c(.1,.1,.1,.1),oma=c(4,4,1,1))
+setYlim<-.4
+
+make_sum_1<-function(input)
+{
+ tmp<-input
+ tots<-sum(tmp)
+ obs<-tmp/tots
+ return(obs)
+}
+ 
+plot(LengthBins[[1]],make_sum_1(snowad.rep[[1]]$"bserved Prop industry survey female"),ylim=c(0,setYlim),ylab="",pch=15,las=1,xaxt='n',col=2)
+for (x in 1:length(snowad.rep))
+ lines(LengthBins[[1]],make_sum_1(snowad.rep[[x]]$"Predicted Prop industry survey female"),lty=x,col=2);
+
+par(new=T)
+
+plot(LengthBins[[1]],make_sum_1(snowad.rep[[1]]$"Observed Prop industry survey male"),xaxt='n',ylab="",ylim=c(0,setYlim),pch=16,col=4,yaxt='n')
+for (x in 1:length(snowad.rep))
+   lines(LengthBins[[1]],make_sum_1(snowad.rep[[x]]$"Predicted Prop industry survey male"),lty=x,col=4);
+legend("topleft",bty='n',"Industry 2009")
+
+#=========================================================================
+plot(LengthBins[[1]],make_sum_1(snowad.rep[[1]]$"Observed Prop industry nmfs survey female"),ylim=c(0,setYlim),ylab="",pch=15,las=1,xaxt='n',col=2,yaxt='n')
+for (x in 1:length(snowad.rep))
+ lines(LengthBins[[1]],make_sum_1(snowad.rep[[x]]$"Predicted Prop industry nmfs survey female"),lty=x,col=2);
+
+par(new=T)
+
+plot(LengthBins[[1]],make_sum_1(snowad.rep[[1]]$"Observed Prop industry nmfs survey male"),xaxt='n',ylab="",ylim=c(0,setYlim),pch=16,col=4,yaxt='n')
+for (x in 1:length(snowad.rep))
+   lines(LengthBins[[1]],make_sum_1(snowad.rep[[x]]$"redicted Prop industry nmfs survey male"),lty=x,col=4);
+legend("topleft",bty='n',"NMFS 2009")   
+   
+ legend("topright",bty='n',lty=seq(1,length(ScenarioNames)),legend=ScenarioNames)
+#=========================================================================
+
+plot(LengthBins[[1]],make_sum_1(snowad.rep[[1]]$"Observed Prop 2010 industry survey female"),ylim=c(0,setYlim),ylab="",pch=15,las=1,col=2)
+for (x in 1:length(snowad.rep))
+ lines(LengthBins[[1]],make_sum_1(snowad.rep[[x]]$"Predicted Prop 2010 industry survey female"),lty=x,col=2);
+
+par(new=T)
+
+plot(LengthBins[[1]],make_sum_1(snowad.rep[[1]]$"Observed Prop 2010 industry survey male"),xaxt='n',ylab="",ylim=c(0,setYlim),pch=16,col=4,yaxt='n',xaxt='n')
+for (x in 1:length(snowad.rep))
+   lines(LengthBins[[1]],make_sum_1(snowad.rep[[x]]$"Predicted Prop 2010 industry survey male"),lty=x,col=4);
+legend("topleft",bty='n',"Industry 2010")   
+   
+#=========================================================================
+plot(LengthBins[[1]],make_sum_1(snowad.rep[[1]]$"Observed Prop 2010 industry nmfs survey female"),ylim=c(0,setYlim),ylab="",pch=15,las=1,yaxt='n',col=2)
+for (x in 1:length(snowad.rep))
+ lines(LengthBins[[1]],make_sum_1(snowad.rep[[x]]$"Predicted Prop 2010 industry nmfs survey female"),lty=x,col=2);
+
+par(new=T)
+
+plot(LengthBins[[1]],make_sum_1(snowad.rep[[1]]$"Observed Prop 2010 industry nmfs survey male"),xaxt='n',ylab="",ylim=c(0,setYlim),pch=16,col=4,yaxt='n')
+for (x in 1:length(snowad.rep))
+   lines(LengthBins[[1]],make_sum_1(snowad.rep[[x]]$"Predicted Prop 2010 industry nmfs survey male"),lty=x,col=4);
+legend("topleft",bty='n',"NMFS 2010")   
+   
+   
+ mtext(side=1,line=2.5,"Carapace width (mm)",outer=T)
+ mtext(side=2,outer=T,line=2.5,"Proportion")
+
+
+  legend("topright",bty='n',lty=c(1,2),pch=c(15,16),legend=c("Males","Females"),
+        col=c(4,2))
+
+#sum(snowad.rep[[x]]$"Predicted Prop industry survey female")
+#sum(snowad.rep[[x]]$"Predicted Prop industry survey male")
+ 
+
+```
+
+
+
+\newpage
+
+```{r,echo=FALSE,warning=FALSE,message=F,fig.width=8.5,fig.height=10,fig.cap="\\label{survcomp_fits_m_imm}Model fits to immature male survey size-composition data. Y-axes are proportion."}
+
+obs<-rep(list(list()),length(ScenarioNames))
+for(x in 1:length(snowad.rep))
+{
+  obs[[x]]<-snowad.rep[[x]]$"Observed proportion survey immature new male" [,-1] + 
+    snowad.rep[[x]]$"Observed proportion survey immature old male" [,-1]
+ tmp<-obs[[x]]
+ tots<-apply(tmp,1,sum)
+ obs[[x]]<-sweep(tmp,1,tots,"/")
+}
+
+inPred<-rep(list(list()),length(ScenarioNames))
+for(x in 1:length(snowad.rep))
+{
+ inPred[[x]]<-snowad.rep[[x]]$"Predicted proportion survey immature new male" [,-1] + 
+    snowad.rep[[x]]$"Predicted proportion survey immature old male" [,-1]
+ tmp<-inPred[[x]]
+ tots<-apply(tmp,1,sum)
+ inPred[[x]]<-sweep(tmp,1,tots,"/")
+}
+
+
+LengthBin_in<-LengthBins
+for(x in (length(snowad.rep)+1):length(ScenarioNames))
+LengthBin_in[[x]]<-LengthBin_in[[length(snowad.rep)]]
+
+inYrs<-rep(list(list()),length(ScenarioNames))
+for(x in 1:length(snowad.rep))
+ inYrs[[x]]<-  SurveyYrs[[x]][1:(SurvYrN[[x]])]
+
+
+
+
+ inYrs[[2]]<-inYrs[[3]]
+
+
+PlotLenProps(obs = obs,
+             pred =inPred,
+             inYears = inYrs,
+             xquant = LengthBin_in,
+             chopX = 140,
+             chopY = .3,
+             XaxisN = 7,
+             YaxisN = 7,minX=27.5)
+             plot.new()
+              legend("center",pch=c(NA,16,NA),lty=c(NA,NA,1),
+                    col=c(NA,1,2),legend=c("Immature males","Obs","Pred"),bty='n')
+                          plot.new()
+             legend("center",lty=seq(1,length(ScenarioNames)),legend=ScenarioNames,bty='n',col=seq(1,length(ScenarioNames)))
+             
+```
+
+
+\newpage
+
+```{r,echo=FALSE,warning=FALSE,message=F,fig.width=8.5,fig.height=10,fig.cap="\\label{survcomp_fits_f_imm}Model fits to immature female survey size-composition data. Y-axes are proportion."}
+
+obs<-rep(list(list()),length(Scenarios))
+for(x in 1:length(snowad.rep))
+{
+  obs[[x]]<-snowad.rep[[x]]$"Observed proportion survey immature new female" [,-1] + 
+    snowad.rep[[x]]$"Observed proportion survey immature old female" [,-1]
+ tmp<-obs[[x]]
+ tots<-apply(tmp,1,sum)
+ obs[[x]]<-sweep(tmp,1,tots,"/")
+}
+
+
+
+
+inPred<-rep(list(list()),length(Scenarios))
+for(x in 1:length(snowad.rep))
+{
+ inPred[[x]]<-snowad.rep[[x]]$"Predicted proportion survey immature new female" [,-1] + 
+    snowad.rep[[x]]$"Predicted proportion survey immature old female" [,-1]
+ tmp<-inPred[[x]]
+ tots<-apply(tmp,1,sum)
+ inPred[[x]]<-sweep(tmp,1,tots,"/")
+}
+
+
+LengthBin_in<-LengthBins
+for(x in (length(snowad.rep)+1):length(ScenarioNames))
+LengthBin_in[[x]]<-LengthBin_in[[length(snowad.rep)]]
+
+inYrs<-rep(list(list()),length(ScenarioNames))
+for(x in 1:length(snowad.rep))
+ inYrs[[x]]<-  SurveyYrs[[x]][1:(SurvYrN[[x]])]
+
+
+
+PlotLenProps(obs = obs,
+             pred =inPred,
+             inYears = inYrs,
+             xquant = LengthBin_in,
+             chopX = 80,
+             chopY = .5,
+             XaxisN = 7,
+             YaxisN = 7,minX=27.5)
+             plot.new()
+              legend("center",pch=c(NA,16,NA),lty=c(NA,NA,1),
+                    col=c(NA,1,2),legend=c("Immature females","Obs","Pred"),bty='n')
+                          plot.new()
+             legend("center",lty=seq(1,length(ScenarioNames)),legend=ScenarioNames,bty='n',col=seq(1,length(ScenarioNames)))
+             
+```
+
+
+\newpage
+
+```{r,echo=FALSE,warning=FALSE,message=F,fig.width=8.5,fig.height=10,fig.cap="\\label{survcomp_fits_m_mat}Model fits to mature male survey size-composition data. Y-axes are proportion."}
+
+obs<-rep(list(list()),length(Scenarios))
+for(x in 1:length(snowad.rep))
+{
+  obs[[x]]<-snowad.rep[[x]]$"Observed proportion survey mature new male" [,-1] + 
+    snowad.rep[[x]]$"Observed proportion survey mature old male" [,-1]
+ tmp<-obs[[x]]
+ tots<-apply(tmp,1,sum)
+ obs[[x]]<-sweep(tmp,1,tots,"/")
+}
+
+
+
+inPred<-rep(list(list()),length(Scenarios))
+for(x in 1:length(snowad.rep))
+{
+ inPred[[x]]<-snowad.rep[[x]]$"Predicted proportion survey mature new male" [,-1] + 
+    snowad.rep[[x]]$"Predicted proportion survey mature old male" [,-1]
+ tmp<-inPred[[x]]
+ tots<-apply(tmp,1,sum)
+ inPred[[x]]<-sweep(tmp,1,tots,"/")
+}
+
+
+LengthBin_in<-LengthBins
+for(x in (length(snowad.rep)+1):length(ScenarioNames))
+LengthBin_in[[x]]<-LengthBin_in[[length(snowad.rep)]]
+
+inYrs<-rep(list(list()),length(ScenarioNames))
+for(x in 1:length(snowad.rep))
+ inYrs[[x]]<-  SurveyYrs[[x]][1:(SurvYrN[[x]])]
+
+
+obs_bub<-obs
+pred_bub<-inPred
+
+PlotLenProps(obs = obs,
+             pred =inPred,
+             inYears = inYrs,
+             xquant = LengthBin_in,
+             chopX = 140,
+             chopY = .2,
+             XaxisN = 7,
+             YaxisN = 7,minX=27.5)
+             plot.new()
+              legend("center",pch=c(NA,16,NA),lty=c(NA,NA,1),
+                    col=c(NA,1,2),legend=c("Mature males","Obs","Pred"),bty='n')
+                          plot.new()
+             legend("center",lty=seq(1,length(ScenarioNames)),legend=ScenarioNames,bty='n',col=seq(1,length(ScenarioNames)))
+             
+```
+
+\newpage
+
+
+
+```{r,echo=FALSE,warning=FALSE,message=F,fig.width=8.5,fig.height=10,fig.cap="\\label{survcomp_fits_f_mat}Model fits to mature female survey size-composition data. Y-axes are proportion."}
+
+obs<-rep(list(list()),length(Scenarios))
+for(x in 1:length(Scenarios))
+{
+  obs[[x]]<-snowad.rep[[x]]$"Observed proportion survey mature new female" [,-1] + 
+    snowad.rep[[x]]$"Observed proportion survey mature old female" [,-1]
+ tmp<-obs[[x]]
+ tots<-apply(tmp,1,sum)
+ obs[[x]]<-sweep(tmp,1,tots,"/")
+}
+
+
+
+
+inPred<-rep(list(list()),length(Scenarios))
+for(x in 1:length(Scenarios))
+{
+ inPred[[x]]<-snowad.rep[[x]]$"Predicted proportion survey mature new female" [,-1] + 
+    snowad.rep[[x]]$"Predicted proportion survey mature old female" [,-1]
+ tmp<-inPred[[x]]
+ tots<-apply(tmp,1,sum)
+ inPred[[x]]<-sweep(tmp,1,tots,"/")
+}
+
+
+
+LengthBin_in<-LengthBins
+for(x in (length(snowad.rep)+1):length(ScenarioNames))
+LengthBin_in[[x]]<-LengthBin_in[[length(snowad.rep)]]
+
+inYrs<-rep(list(list()),length(ScenarioNames))
+for(x in 1:length(snowad.rep))
+ inYrs[[x]]<-  SurveyYrs[[x]][1:(SurvYrN[[x]])]
+
+
+PlotLenProps(obs = obs,
+             pred =inPred,
+             inYears = inYrs,
+             xquant = LengthBin_in,
+             chopX = 80,
+             chopY = .45,
+             XaxisN = 7,
+             YaxisN = 7,minX=27.5)
+             plot.new()
+              legend("center",pch=c(NA,16,NA),lty=c(NA,NA,1),
+                    col=c(NA,1,2),legend=c("Mature females","Obs","Pred"),bty='n')
+                          plot.new()
+             legend("center",lty=seq(1,length(ScenarioNames)),legend=ScenarioNames,bty='n',col=seq(1,length(ScenarioNames)))
+             
+```
+
+
+
+\newpage
+
+```{r,echo=FALSE,warning=FALSE,message=F,fig.width=8,fig.height=10,fig.cap="\\label{predselect}Estimated survey selectivity."}
+#=========================================================
+# survey selectivities, molting probability, weight at length
+#=======================================================
+
+par(mfrow=c(2,2),mar=c(.1,.1,.3,.1),oma=c(4,4,1,1))
+plot(snowad.rep[[1]]$"selectivity survey female Era 2"~LengthBins[[1]],type='l',ylim=c(0,1),ylab='',las=1,xlab="",xaxt='n',lwd=2)
+for(x in 1:length(snowad.rep))
+  {
+  lines(snowad.rep[[x]]$"selectivity survey female Era 2"~LengthBins[[x]],col=x,ylim=c(0,1),ylab='',las=1,xlab="",xaxt='n',lty=x,lwd=2)
+  }
+legend("topleft",legend=c("1982-1988"),bty='n')
+mtext(side=3,"Female")
+
+plot(snowad.rep[[1]]$"selectivity survey male Era 2"~LengthBins[[1]],type='l',ylim=c(0,1),ylab='',las=1,xlab="",xaxt='n',lwd=2,yaxt='n')
+for(x in 1:length(snowad.rep))
+  {
+  lines(snowad.rep[[x]]$"selectivity survey male Era 2"~LengthBins[[x]],col=x,ylim=c(0,1),ylab='',las=1,xlab="",xaxt='n',lty=x,lwd=2)
+  }
+legend("topleft",legend=c("1982-1988"),bty='n')
+mtext(side=3,"Male")
+
+
+#======================================
+# era 2
+#======================================
+
+plot(snowad.rep[[1]]$"selectivity survey female Era 3"~LengthBins[[1]],type='l',ylim=c(0,1),ylab='',las=1,xlab="",lwd=2)
+
+for(x in 1:length(snowad.rep))
+{
+  if(length(snowad.rep[[x]]$"selectivity survey female Era 3")>length(LengthBins[[x]]))
+  {
+      input<-apply(snowad.rep[[x]]$"selectivity survey female Era 3",2,median)
+      lines(input~LengthBins[[x]],col=2,ylim=c(0,1),ylab='',las=1,xlab="",xaxt='n',lty=x,lwd=2)
+    }
+
+  if(length(snowad.rep[[x]]$"selectivity survey female Era 3")==length(LengthBins[[x]]))
+  {
+    lines(snowad.rep[[x]]$"selectivity survey female Era 3"~ LengthBins[[x]],col=x,ylim=c(0,1),ylab='',las=1,xlab="",xaxt='n',lty=x,lwd=2)
+    }
+}
+  
+
+
+plot(snowad.rep[[1]]$"selectivity survey male Era 3"~LengthBins[[1]],type='l',ylim=c(0,1),ylab='',las=1,xlab="",lwd=2,yaxt='n')
+
+for(x in 1:length(snowad.rep))
+{
+  if(length(snowad.rep[[x]]$"selectivity survey male Era 3")>length(LengthBins[[x]]))
+  {
+      input<-apply(snowad.rep[[x]]$"selectivity survey male Era 3",2,median)
+      lines(input~LengthBins[[x]],col=x,ylim=c(0,1),ylab='',las=1,xlab="",xaxt='n',lty=x,lwd=2)
+    }
+
+  if(length(snowad.rep[[x]]$"selectivity survey male Era 3")==length(LengthBins[[x]]))
+  {
+lines(snowad.rep[[x]]$"selectivity survey male Era 3"~ LengthBins[[x]],col=x,ylim=c(0,1),ylab='',las=1,xlab="",xaxt='n',lty=x,lwd=2)
+    }
+}
+  
+
+
+legend("topleft",legend=c("1989-present"),bty='n')
+legend("bottomright",bty='n',lty=seq(1,length(ScenarioNames)),col=seq(1,length(ScenarioNames)),legend=ScenarioNames,lwd=2)
+mtext(side=1,"Carapace width (mm)",line=2,outer=T)
+mtext(side=2,"Survey selectivity",line=2.5,outer=T)
+
+
+```
+
+\newpage
+
+```{r,echo=FALSE,warning=FALSE,message=F,fig.width=8,fig.height=10,fig.cap="\\label{time_vary_q}Estimated time-varying survey catchability for males and females."}
+
+par(mfrow=c(2,1),mar=c(.1,.1,.1,.1),oma=c(4,4,1,1))
+plot(-1000,xlim=c(min(SurveyYrs[[2]]),max(SurveyYrs[[2]])),ylim=c(0,1),ylab='',las=1,xlab="",lwd=2,xaxt='n')
+
+for(x in 1:length(snowad.rep))
+{
+  if(length(snowad.rep[[x]]$"selectivity survey female Era 3")>length(LengthBins[[x]]))
+  {
+      lines(snowad.rep[[x]]$"selectivity survey female Era 3"[,22] ~ seq(1988,max(SurveyYrs[[x]])+1),col=x,lty=1,lwd=2)
+    }
+}
+legend('topleft',bty='n',legend=c("Females"))
+plot(-1000,xlim=c(min(SurveyYrs[[2]]),max(SurveyYrs[[2]])),ylim=c(0,1),ylab='',las=1,xlab="",lwd=2)
+
+for(x in 1:length(snowad.rep))
+{
+  if(length(snowad.rep[[x]]$"selectivity survey female Era 3")>length(LengthBins[[x]]))
+  {
+    lines(snowad.rep[[x]]$"selectivity survey male Era 3"[,22] ~ seq(1988,max(SurveyYrs[[x]])+1),col=x,lty=1,lwd=2)
+    }
+}
+legend("bottomright",bty='n',lty=rep(1,length(ScenarioNames)),legend=ScenarioNames,lwd=2,col=seq(1,length(ScenarioNames)))
+mtext(side=2,outer=T,line=2.2,"Catchability")
+legend('topleft',bty='n',legend=c("Males"))
+mtext(side=1,line=2.5,"Year")
+
+```
+
+\newpage
+
+```{r,echo=FALSE,warning=FALSE,message=F,fig.width=8,fig.height=10,fig.cap="\\label{predBSFRF}Estimated experimental survey selectivity (availability * survey selectivity)"}
+#=========================================================
+# BSFRF survey selectivities, molting probability, weight at length
+#=======================================================
+par(mfrow=c(2,2),mar=c(.1,.1,.3,.1),oma=c(4,4,1,1))
+plot(snowad.rep[[1]]$"selectivity industry survey females 2009"~LengthBins[[1]],type='l',ylim=c(0,1),ylab='',las=1,xlab="",xaxt='n')
+for(x in 1:length(snowad.rep))
+{
+lines(snowad.rep[[x]]$"selectivity industry survey females 2009" ~ LengthBins[[1]], col=2, ylim=c(0,1), ylab='', las=1, xlab="", xaxt='n', lty=x)
+lines(snowad.rep[[x]]$"selectivity industry survey males 2009"~LengthBins[[1]],col=4,ylim=c(0,1),ylab='',las=1,xlab="",xaxt='n',lty=x)
+}
+
+
+legend("topleft",col=c(4,2),legend=c("Male","Female"),bty='n',lty=1)
+# points((SurveyExpmntData09[5:8,]/(SurveyExpmntData09[1:4,]+SurveyExpmntData09[5:8,]))~matrix(rep(LengthBins,4),nrow=4,byrow=T),pch=16,col="#cfcfcf88")
+
+plot(snowad.rep[[1]]$"selectivity industry survey females 2010"~LengthBins[[1]],type='l',ylim=c(0,1),ylab='',las=1,xlab="",xaxt='n', yaxt='n')
+for(x in 1:length(snowad.rep))
+{
+lines(snowad.rep[[x]]$"selectivity industry survey females 2010"~LengthBins[[1]],col=2,ylim=c(0,1),ylab='',las=1,xlab="",xaxt='n',lty=x)
+lines(snowad.rep[[x]]$"selectivity industry survey males 2010"~LengthBins[[1]],col=4,ylim=c(0,1),ylab='',las=1,xlab="",xaxt='n',lty=x)
+}
+
+
+
+plot(snowad.rep[[1]]$"selectivity nmfs industry survey females 2009"~LengthBins[[1]],type='l',ylim=c(0,1),ylab='',las=1,xlab="")
+for(x in 1:length(Scenarios))
+{
+lines(snowad.rep[[x]]$"selectivity nmfs industry survey females 2009"~LengthBins[[x]],col=2,ylim=c(0,1),ylab='',las=1,xlab="",xaxt='n',lty=x)
+lines(snowad.rep[[x]]$"selectivity nmfs industry survey males 2009"~LengthBins[[x]],col=4,ylim=c(0,1),ylab='',las=1,xlab="",xaxt='n',lty=x)
+}
+
+
+legend("topleft",bty='n',lty=seq(1,length(ScenarioNames)),legend=ScenarioNames)
+
+plot(snowad.rep[[1]]$"selectivity nmfs industry survey females 2010"~LengthBins[[1]],type='l',ylim=c(0,1),ylab='',las=1,xlab="",yaxt='n')
+for(x in 1:length(snowad.rep))
+{
+lines(snowad.rep[[x]]$"selectivity nmfs industry survey females 2010" ~LengthBins[[1]],col=2,ylim=c(0,1),ylab='',las=1,xlab="",xaxt='n',lty=x)
+lines(snowad.rep[[x]]$"selectivity nmfs industry survey males 2010"~LengthBins[[1]],col=4,ylim=c(0,1),ylab='',las=1,xlab="",xaxt='n',lty=x)
+}
+
+mtext(outer=T,side=2,adj=.2,"NMFS",line=2.5)
+mtext(outer=T,side=2,adj=.8,"Industry",line=2.5)
+mtext(outer=T,side=3,adj=.2,2009)
+mtext(outer=T,side=3,adj=.8,2010)
+mtext(side=1,outer=T,line=2.5,"Carapace width (mm)")
+
+```
+
+
+
+
+
+
+\newpage
+
+```{r,echo=FALSE,warning=FALSE,message=F,fig.width=8.5,fig.height=5,fig.cap="\\label{vary_nat_m}Estimated time-varying natural mortality by sex. Note different scales between sexes."}
+
+murph_m<-read.csv('data/murphy_m.csv')
+
+par(mfrow=c(2,1),mar=c(.1,.1,.1,.1),oma=c(4,4,1,1))
+natM<-NULL
+plot(-1000,xlim=c(min(SurveyYrs[[4]]),max(SurveyYrs[[4]])),ylim=c(0,5),xaxt='n',las=1)
+for(x in 3:4) 
+ lines(snowad.rep[[x]]$"atural mortality mature"[2,1:(length(SurveyYrs[[x]])+1)]~ c(SurveyYrs[[x]],2020),col=x,lty=1,lwd=2)
+ legend('topleft',bty='n',legend=c("Males"))
+   legend("top",bty='n',lty=seq(1,length(ScenarioNames)),legend=ScenarioNames,lwd=1,col=seq(1,length(ScenarioNames)))
+   
+
+   
+   
+plot(-1000,xlim=c(min(SurveyYrs[[4]]),max(SurveyYrs[[4]])),ylim=c(0,1.25),xaxt='n',las=1)
+for(x in 3:4) 
+ lines(snowad.rep[[x]]$"atural mortality mature"[1,1:(length(SurveyYrs[[x]])+1)]~c(SurveyYrs[[x]],2020),col=x,lty=1,lwd=2) 
+ legend('topleft',bty='n',legend=c("Females"))
+
+  
+ axis(side=1)
+ mtext(side=2,line=2.5,outer=T,"Natural mortality (yr^-1)")
+ 
+```
+
+\newpage
+
+
